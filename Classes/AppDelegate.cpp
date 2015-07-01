@@ -46,6 +46,20 @@ bool AppDelegate::applicationDidFinishLaunching() {
 
     register_all_packages();
 
+    
+    //添加搜索路径
+    //添加搜索路径
+    vector<string> searchPaths = FileUtils::getInstance()->getSearchPaths();
+    searchPaths.insert(searchPaths.begin(), "DemonFruit");
+    searchPaths.insert(searchPaths.begin(), "Scene");
+    FileUtils::getInstance()->setSearchPaths(searchPaths);
+
+   
+    //
+    //    加载资源
+    //
+    
+    
     // create a scene. it's an autorelease object
     auto scene = PlayLayer::createScene();
 
