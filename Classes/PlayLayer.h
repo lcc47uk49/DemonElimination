@@ -16,8 +16,8 @@
 #include "GameTools.h"
 using namespace cocos2d;
 
-#define Fruits_MATRIX_WIDTH (10)
-#define Fruits_MATRIX_HEIGHT (10)
+#define Fruits_MATRIX_WIDTH (4)
+#define Fruits_MATRIX_HEIGHT (4)
 //间隙
 #define Fruits_GAP  (6)
 class PlayLayer : public Layer
@@ -35,16 +35,12 @@ public:
     virtual void onTouchEnded(Touch *touch, Event *unused_event);
     virtual void update(float dt);
 private:
-    //根据传入的整形矩阵初始化果实矩阵
-    void initFruitsMatrix();
-    //根据行列号和编号创建果实
-    void createAndDropFruits(int row, int col, int index);
-    //返回矩阵元素对应的坐标
-    Point positionOfItem(int row, int col);
-    //根据点击的位置选择对应的果实
-    DemonFruit* fruitOfPoint(Point* pos);
-    //交换两个果实
-    void swapFruit();
+    void initFruitsMatrix();//根据m_iMatrix初始化果实矩阵
+    void createAndDropFruits(int row, int col, int index);//根据行列号和编号创建果实
+    Point positionOfItem(int row, int col);//返回矩阵元素对应的坐标
+    DemonFruit* fruitOfPoint(Point* pos);//根据点击的位置选择对应的果实
+    void checkAndSwapFruit();//检查是否可以交换
+    void swapFruitInMatrix();//交换矩阵中的两个果实，并没有改变坐标
     //将与fruit相同编号的果实加入队列chainList
     void getColChain(DemonFruit *fruit, std::list<DemonFruit *> &chainList);
     void getRowChain(DemonFruit *fruit, std::list<DemonFruit *> &chainList);
@@ -52,9 +48,13 @@ private:
     void checkAndRemoveChain();
     void removeFruit();//消除被标记的果实
     void fillVacancies();//下落填充空缺
+
+    bool isDeadMap();//是否无路可走
+    void resetFruitMatrix();//没有可消除的时候则重新生成果实矩阵
+    void actionEndCallback(Node* node);//消除回调函数,从父节点移除果实
 private:
-    DemonFruit** m_fruitsMatrix;//果实矩阵
-    int m_iMatrix[Fruits_MATRIX_WIDTH][Fruits_MATRIX_HEIGHT];//整形矩阵
+    DemonFruit** m_fruitsMatrix;//一维数组表示的果实矩阵，从左下角开始
+    int* m_iMatrix;//一维数组表示的整型生成矩阵，对应果实矩阵中果实的编号
     int m_width;//列数
     int m_height;//行数
     float m_matrixLeftBottomX;//矩阵做下角的点的横坐标

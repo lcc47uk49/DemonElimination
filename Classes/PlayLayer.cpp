@@ -22,15 +22,8 @@ Scene* PlayLayer::createScene()
     return scene;
 }
 
-PlayLayer::PlayLayer():m_fruitsMatrix(NULL),m_width(0),m_height(0), m_matrixLeftBottomX(0), m_matrixLeftBottomY(0),m_isTouchEnable(true), m_srcFruit(NULL),m_dstFruit(NULL),m_isAnimationing(true),m_isNeedFillVacancies(false),m_lastExplodeFruitNo(-1)
+PlayLayer::PlayLayer():m_fruitsMatrix(NULL),m_iMatrix(NULL),m_width(0),m_height(0), m_matrixLeftBottomX(0), m_matrixLeftBottomY(0),m_isTouchEnable(true), m_srcFruit(NULL),m_dstFruit(NULL),m_isAnimationing(true),m_isNeedFillVacancies(false),m_lastExplodeFruitNo(-1)
 {
-    for(int i = 0; i < Fruits_MATRIX_WIDTH; i++)
-    {
-        for (int j = 0; j < Fruits_MATRIX_HEIGHT; j++)
-        {
-            m_iMatrix[i][j] = 0;
-        }
-    }
     m_fruitSize = Size(0, 0);
 }
 
@@ -39,6 +32,10 @@ PlayLayer::~PlayLayer()
     if (m_fruitsMatrix)
     {
         free(m_fruitsMatrix);
+    }
+    if(m_iMatrix)
+    {
+        free(m_iMatrix);
     }
 }
 
@@ -76,7 +73,7 @@ bool PlayLayer::init()
     //加载图片资源
     SpriteFrameCache::getInstance()->addSpriteFramesWithFile("DemonFruits.plist");
     
-    //开辟内存
+    //为两个矩阵开辟内存
     m_width = Fruits_MATRIX_WIDTH;
     m_height = Fruits_MATRIX_HEIGHT;
     
@@ -84,35 +81,24 @@ bool PlayLayer::init()
     m_fruitsMatrix = (DemonFruit**)malloc(arrSize);
     memset((void*)m_fruitsMatrix, 0, arrSize);
     
-    //读取整形矩阵/生成整形矩阵
-    for (int i = 0; i < Fruits_MATRIX_WIDTH; i++)
-    {
-        for (int j = 0; j < Fruits_MATRIX_HEIGHT; j++)
-        {
-            vector<int> vecTmp = GameManager::getInstance()->getusedFruitsNo();
-            
-            size_t length = vecTmp.size();
-            //取一个随机位置的元素值
-            int randNo = rand()%length;
-            m_iMatrix[i][j] = vecTmp[randNo];
-        }
-    }
+    int arrSize2 = sizeof(int*) * m_width * m_height;
+    m_iMatrix = (int*)malloc(arrSize2);
+    memset((void*)m_iMatrix, 0, arrSize2);
     
     //初始化左下角的点的坐标和果实图片大小,这里创建的果实不addChild
     DemonFruit* fruit = DemonFruit::create(1, 1, 1);
     Rect fruitRect = fruit->boundingBox();
     m_fruitSize = fruitRect.size;
-//    CCLOG("fruitSize.width = %f",m_fruitSize.width);
     //果实和空隙总共的宽、高
     float wid = m_width * m_fruitSize.width + (m_width -1 ) * Fruits_GAP;
-    float hgt = m_height * m_fruitSize.height + (m_height - 1) * Fruits_GAP;
+//    float hgt = m_height * m_fruitSize.height + (m_height - 1) * Fruits_GAP;
     //左下角的点的横坐标为左边间隙+图片宽度的一半
     m_matrixLeftBottomX = (winSize.width - wid)/2 + m_fruitSize.width/2;
     //左下角点的纵坐标可以自己设置
     m_matrixLeftBottomY = 200;
     
-    initFruitsMatrix();//初始化矩阵
-    scheduleUpdate();
+    initFruitsMatrix();//根据m_iMatrix初始化果实矩阵
+    
     
     //触摸绑定--单点触摸
     auto touchListener = EventListenerTouchOneByOne::create();
@@ -126,11 +112,29 @@ bool PlayLayer::init()
 
 void PlayLayer::initFruitsMatrix()
 {
-    for (int row = 0; row < m_height; row++) {
-        for (int col = 0; col < m_width; col++) {
-            createAndDropFruits(row, col, m_iMatrix[row][col]);
+    //读取整形矩阵/生成整形矩阵
+    for (int row = 0; row < m_height; row++)
+    {
+        for (int col = 0; col < m_width; col++)
+        {
+            vector<int> vecTmp = GameManager::getInstance()->getusedFruitsNo();
+            
+            size_t length = vecTmp.size();
+            //取一个随机位置的元素值
+            int randNo = rand()%length;
+            m_iMatrix[row * m_width + col] = vecTmp[randNo];
         }
     }
+    
+    for (int row = 0; row < m_height; row++)
+    {
+        for (int col = 0; col < m_width; col++)
+        {
+            createAndDropFruits(row, col, m_iMatrix[row * m_width + col]);
+        }
+    }
+    //开启更新函数
+    scheduleUpdate();
 }
 
 void PlayLayer::createAndDropFruits(int row, int col, int index)
@@ -155,6 +159,103 @@ Point PlayLayer::positionOfItem(int row, int col)
     return Point(x, y);
 }
 
+
+
+bool PlayLayer::onTouchBegan(Touch *touch, Event *unused_event)
+{
+    m_srcFruit = NULL;
+    m_dstFruit = NULL;
+    if (m_isTouchEnable)
+    {
+        Point localPos = m_ctrFitNode->convertTouchToNodeSpace(touch);
+        m_srcFruit = fruitOfPoint(&localPos);
+        //高亮显示！！
+    }
+    return  m_isTouchEnable;
+}
+
+void PlayLayer::onTouchMoved(Touch *touch, Event *unused_event)
+{
+    if(!m_isTouchEnable || !m_srcFruit)
+        return ;
+    int row = m_srcFruit->getRow();
+    int col = m_srcFruit->getCol();
+    auto halfFruitWidth = m_fruitSize.width/2;
+    auto halfFruitHeight = m_fruitSize.height/2;
+    auto localPos = m_ctrFitNode->convertTouchToNodeSpace(touch);
+    
+    //上方区域
+    auto upRect = Rect(m_srcFruit->getPositionX() - halfFruitWidth,
+                       m_srcFruit->getPositionY() + halfFruitHeight + Fruits_GAP,
+                       m_fruitSize.width,
+                       m_fruitSize.height);
+    if (upRect.containsPoint(localPos))
+    {
+        row++;
+        if (row < m_height)
+        {
+            m_dstFruit = m_fruitsMatrix[row * m_width + col];
+        }
+        checkAndSwapFruit();
+        return;
+    }
+   
+    //下方区域
+    auto downRect = Rect(m_srcFruit->getPositionX() - halfFruitWidth,
+                       m_srcFruit->getPositionY() - halfFruitHeight*3 - Fruits_GAP,
+                       m_fruitSize.width,
+                       m_fruitSize.height);
+    if (downRect.containsPoint(localPos))
+    {
+        row--;
+        if (row >= 0)
+        {
+            m_dstFruit = m_fruitsMatrix[row * m_width + col];
+        }
+        checkAndSwapFruit();
+        return;
+    }
+    
+    //左方区域
+    auto leftRect = Rect(m_srcFruit->getPositionX() - halfFruitWidth*3 - Fruits_GAP,
+                         m_srcFruit->getPositionY() - halfFruitHeight,
+                         m_fruitSize.width,
+                         m_fruitSize.height);
+    if (leftRect.containsPoint(localPos))
+    {
+        col--;
+        if (col >= 0)
+        {
+            m_dstFruit = m_fruitsMatrix[row * m_width + col];
+        }
+        checkAndSwapFruit();
+        return;
+    }
+    
+    //右方区域
+    auto rightRect = Rect(m_srcFruit->getPositionX() + halfFruitWidth + Fruits_GAP,
+                         m_srcFruit->getPositionY() - halfFruitHeight,
+                         m_fruitSize.width,
+                         m_fruitSize.height);
+    if (rightRect.containsPoint(localPos))
+    {
+        col++;
+        if (col < m_width)
+        {
+            m_dstFruit = m_fruitsMatrix[row * m_width + col];
+        }
+        checkAndSwapFruit();
+        return;
+    }
+    //not a useful movement
+}
+
+void PlayLayer::onTouchEnded(Touch *touch, Event *unused_event)
+{
+    //去除高亮！！
+    
+}
+
 DemonFruit* PlayLayer::fruitOfPoint(Point *pos)
 {
     DemonFruit* fruit = NULL;
@@ -171,7 +272,7 @@ DemonFruit* PlayLayer::fruitOfPoint(Point *pos)
     return NULL;
 }
 
-void PlayLayer::swapFruit()
+void PlayLayer::checkAndSwapFruit()
 {
     //交换的时候不允许触摸
     m_isTouchEnable = false;
@@ -187,14 +288,7 @@ void PlayLayer::swapFruit()
     float time = 0.2;
     
     //1.swap in matrix
-    m_fruitsMatrix[m_srcFruit->getRow() * m_width + m_srcFruit->getCol()] = m_dstFruit;
-    m_fruitsMatrix[m_dstFruit->getRow() * m_width + m_dstFruit->getCol()] = m_srcFruit;
-    int tmpRow = m_srcFruit->getRow();
-    int tmpCol = m_srcFruit->getCol();
-    m_srcFruit->setRow(m_dstFruit->getRow());
-    m_srcFruit->setCol(m_dstFruit->getCol());
-    m_dstFruit->setRow(tmpRow);
-    m_dstFruit->setCol(tmpCol);
+    swapFruitInMatrix();
     
     //2. check for remove able
     std::list<DemonFruit *> colChainListOfFirst;
@@ -221,23 +315,29 @@ void PlayLayer::swapFruit()
     }
     
     //3. no chain, swap back
-    m_fruitsMatrix[m_srcFruit->getRow() * m_width + m_srcFruit->getCol()] = m_dstFruit;
-    m_fruitsMatrix[m_dstFruit->getRow() * m_width + m_dstFruit->getCol()] = m_srcFruit;
-    tmpRow = m_srcFruit->getRow();
-    tmpCol = m_srcFruit->getCol();
-    m_srcFruit->setRow(m_dstFruit->getRow());
-    m_srcFruit->setCol(m_dstFruit->getCol());
-    m_dstFruit->setRow(tmpRow);
-    m_dstFruit->setCol(tmpCol);
+    swapFruitInMatrix();
     
     m_srcFruit->runAction(Sequence::create(
                                            MoveTo::create(time, posOfDst),
                                            MoveTo::create(time, posOfSrc),
                                            NULL));
     m_dstFruit->runAction(Sequence::create(
-                                            MoveTo::create(time, posOfSrc),
-                                            MoveTo::create(time, posOfDst),
-                                            NULL));
+                                           MoveTo::create(time, posOfSrc),
+                                           MoveTo::create(time, posOfDst),
+                                           NULL));
+}
+
+void PlayLayer::swapFruitInMatrix()//交换矩阵中的两个果实，没有改变坐标
+{
+    m_fruitsMatrix[m_srcFruit->getRow() * m_width + m_srcFruit->getCol()] = m_dstFruit;
+    m_fruitsMatrix[m_dstFruit->getRow() * m_width + m_dstFruit->getCol()] = m_srcFruit;
+    int tmpRow = m_srcFruit->getRow();
+    int tmpCol = m_srcFruit->getCol();
+    m_srcFruit->setRow(m_dstFruit->getRow());
+    m_srcFruit->setCol(m_dstFruit->getCol());
+    m_dstFruit->setRow(tmpRow);
+    m_dstFruit->setCol(tmpCol);
+
 }
 
 //横向检查
@@ -309,101 +409,6 @@ void PlayLayer::getRowChain(DemonFruit *fruit, std::list<DemonFruit *> &chainLis
     }
 }
 
-bool PlayLayer::onTouchBegan(Touch *touch, Event *unused_event)
-{
-    m_srcFruit = NULL;
-    m_dstFruit = NULL;
-    if (m_isTouchEnable)
-    {
-        Point localPos = m_ctrFitNode->convertTouchToNodeSpace(touch);
-        m_srcFruit = fruitOfPoint(&localPos);
-        //高亮显示！！
-    }
-    return  m_isTouchEnable;
-}
-
-void PlayLayer::onTouchMoved(Touch *touch, Event *unused_event)
-{
-    if(!m_isTouchEnable || !m_srcFruit)
-        return ;
-    int row = m_srcFruit->getRow();
-    int col = m_srcFruit->getCol();
-    auto halfFruitWidth = m_fruitSize.width/2;
-    auto halfFruitHeight = m_fruitSize.height/2;
-    auto localPos = m_ctrFitNode->convertTouchToNodeSpace(touch);
-    
-    //上方区域
-    auto upRect = Rect(m_srcFruit->getPositionX() - halfFruitWidth,
-                       m_srcFruit->getPositionY() + halfFruitHeight + Fruits_GAP,
-                       m_fruitSize.width,
-                       m_fruitSize.height);
-    if (upRect.containsPoint(localPos))
-    {
-        row++;
-        if (row < m_height)
-        {
-            m_dstFruit = m_fruitsMatrix[row * m_width + col];
-        }
-        swapFruit();
-        return;
-    }
-   
-    //下方区域
-    auto downRect = Rect(m_srcFruit->getPositionX() - halfFruitWidth,
-                       m_srcFruit->getPositionY() - halfFruitHeight*3 - Fruits_GAP,
-                       m_fruitSize.width,
-                       m_fruitSize.height);
-    if (downRect.containsPoint(localPos))
-    {
-        row--;
-        if (row >= 0)
-        {
-            m_dstFruit = m_fruitsMatrix[row * m_width + col];
-        }
-        swapFruit();
-        return;
-    }
-    
-    //左方区域
-    auto leftRect = Rect(m_srcFruit->getPositionX() - halfFruitWidth*3 - Fruits_GAP,
-                         m_srcFruit->getPositionY() - halfFruitHeight,
-                         m_fruitSize.width,
-                         m_fruitSize.height);
-    if (leftRect.containsPoint(localPos))
-    {
-        col--;
-        if (col >= 0)
-        {
-            m_dstFruit = m_fruitsMatrix[row * m_width + col];
-        }
-        swapFruit();
-        return;
-    }
-    
-    //右方区域
-    auto rightRect = Rect(m_srcFruit->getPositionX() + halfFruitWidth + Fruits_GAP,
-                         m_srcFruit->getPositionY() - halfFruitHeight,
-                         m_fruitSize.width,
-                         m_fruitSize.height);
-    if (rightRect.containsPoint(localPos))
-    {
-        col++;
-        if (col < m_width)
-        {
-            m_dstFruit = m_fruitsMatrix[row * m_width + col];
-        }
-        swapFruit();
-        return;
-    }
-    //not a useful movement
-}
-
-void PlayLayer::onTouchEnded(Touch *touch, Event *unused_event)
-{
-    //去除高亮！！
-    
-}
-
 void PlayLayer::update(float dt)
 {
     //check if animationing
@@ -427,78 +432,25 @@ void PlayLayer::update(float dt)
     
     if (!m_isAnimationing)
     {
-        if (m_isNeedFillVacancies)//填充
+        if (isDeadMap())//死地图，重新生成
         {
-            fillVacancies();
-            m_isNeedFillVacancies = false;
+            m_isTouchEnable = false;//不允许触摸
+            unscheduleUpdate();//关闭更新
+            resetFruitMatrix();//重新生成果实矩阵
         }
-        else//消除
+        else
         {
-            checkAndRemoveChain();
-        }
-    }
-}
-
-void PlayLayer::fillVacancies()
-{
-    m_isAnimationing = true;
-    
-    Size size = Director::getInstance()->getWinSize();
-    int *colEmptyInfo = (int *)malloc(sizeof(int) * m_width);
-    memset((void*)colEmptyInfo, 0, sizeof(int) * m_width);
-    
-    //1.drop exist Fruit
-    DemonFruit* fruit = NULL;
-    for (int col = 0; col < m_width; col++)
-    {
-        int removedFruitOfCol = 0;
-        //from buttom to top
-        for (int row = 0; row < m_height; row++)
-        {
-            fruit = m_fruitsMatrix[row * m_width + col];
-            if (NULL == fruit)
+            if (m_isNeedFillVacancies)//填充
             {
-                removedFruitOfCol++;//记录一列中空缺的果实个数
+                fillVacancies();
+                m_isNeedFillVacancies = false;
             }
-            else
+            else//消除
             {
-                if (removedFruitOfCol > 0)
-                {
-                    int newRow = row - removedFruitOfCol;//计算果实将掉落到的行数
-                    //掉落果实
-                    m_fruitsMatrix[newRow * m_width + col] = fruit;
-                    m_fruitsMatrix[row * m_width + col] = NULL;
-                    //移动到新位置
-                    Point startPos = fruit->getPosition();
-                    Point endPos = positionOfItem(newRow, col);
-                    float speed = (startPos.y - endPos.y)/size.height;
-                    fruit->stopAllActions();//停止其他动作
-                    fruit->runAction(MoveTo::create(speed, endPos));
-                    
-                    fruit->setRow(newRow);//设置果实新行
-                }
+                checkAndRemoveChain();
             }
         }
-        colEmptyInfo[col] = removedFruitOfCol;//记录此列空缺的个数
     }
-    
-    //2.create new item and drop down
-    for (int col = 0; col < m_width; col++)
-    {
-        for (int row = m_height - colEmptyInfo[col]; row < m_height; row++)
-        {
-            //从选择使用的果实中随机选择一种
-            vector<int> vecTmp = GameManager::getInstance()->getusedFruitsNo();
-            
-            size_t length = vecTmp.size();
-            //取一个随机位置的元素值
-            int randNo = rand()%length;
-            int randIndex = vecTmp[randNo];
-            createAndDropFruits(row, col, randIndex);
-        }
-    }
-    
-    free(colEmptyInfo);
 }
 
 void PlayLayer::checkAndRemoveChain()
@@ -568,4 +520,207 @@ void PlayLayer::removeFruit()
             m_fruitsMatrix[rowNo * m_width + colNo] = NULL;//置为空
         }
     }
+}
+
+void PlayLayer::fillVacancies()
+{
+    m_isAnimationing = true;
+    
+    Size size = Director::getInstance()->getWinSize();
+    int *colEmptyInfo = (int *)malloc(sizeof(int) * m_width);
+    memset((void*)colEmptyInfo, 0, sizeof(int) * m_width);
+    
+    //1.drop exist Fruit
+    DemonFruit* fruit = NULL;
+    for (int col = 0; col < m_width; col++)
+    {
+        int removedFruitOfCol = 0;
+        //from buttom to top
+        for (int row = 0; row < m_height; row++)
+        {
+            fruit = m_fruitsMatrix[row * m_width + col];
+            if (NULL == fruit)
+            {
+                removedFruitOfCol++;//记录一列中空缺的果实个数
+            }
+            else
+            {
+                if (removedFruitOfCol > 0)
+                {
+                    int newRow = row - removedFruitOfCol;//计算果实将掉落到的行数
+                    //掉落果实
+                    m_fruitsMatrix[newRow * m_width + col] = fruit;
+                    m_fruitsMatrix[row * m_width + col] = NULL;
+                    //移动到新位置
+                    Point startPos = fruit->getPosition();
+                    Point endPos = positionOfItem(newRow, col);
+                    float speed = (startPos.y - endPos.y)/size.height;
+                    fruit->stopAllActions();//停止其他动作
+                    fruit->runAction(MoveTo::create(speed, endPos));
+                    
+                    fruit->setRow(newRow);//设置果实新行
+                }
+            }
+        }
+        colEmptyInfo[col] = removedFruitOfCol;//记录此列空缺的个数
+    }
+    
+    //2.create new item and drop down
+    for (int col = 0; col < m_width; col++)
+    {
+        for (int row = m_height - colEmptyInfo[col]; row < m_height; row++)
+        {
+            //从选择使用的果实中随机选择一种
+            vector<int> vecTmp = GameManager::getInstance()->getusedFruitsNo();
+            
+            size_t length = vecTmp.size();
+            //取一个随机位置的元素值
+            int randNo = rand()%length;
+            int randIndex = vecTmp[randNo];
+            createAndDropFruits(row, col, randIndex);
+        }
+    }
+    
+    free(colEmptyInfo);
+}
+
+bool PlayLayer::isDeadMap()
+{
+    //遍历m_fruitsMatrix
+    for (int row = 0; row < m_height; row++)
+    {
+        for (int col = 0; col < m_width; col++)
+        {
+            //检查上方
+            if (row + 2 >= m_height - 1)//防止上方越界
+            {
+                //do noting;
+            }
+            else
+            {
+                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
+                DemonFruit* fruit1 = m_fruitsMatrix[(row+2) * m_width + col];
+                DemonFruit* fruit2 = m_fruitsMatrix[(row+3) * m_width + col];
+                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                {
+                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
+                    return false;
+                }
+                int curIndex = curFruit->getImgIndex();
+                int upIndex1 = fruit1->getImgIndex();//当前上方第二个果实编号
+                int upIndex2 = fruit2->getImgIndex();//当前上方第三个果实编号
+                if (curIndex == upIndex1 && curIndex == upIndex2)
+                {
+                    return false;//如果上方2、3与自己标记相同，说明可以消除，不是死地图
+                }
+            }
+            
+            //检查下方
+            if (row - 2 <= 0)//防止下方越界
+            {
+                //do noting;
+            }
+            else
+            {
+                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
+                DemonFruit* fruit1 = m_fruitsMatrix[(row-2) * m_width + col];
+                DemonFruit* fruit2 = m_fruitsMatrix[(row-3) * m_width + col];
+                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                {
+                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
+                    return false;
+                }
+                int curIndex = curFruit->getImgIndex();//当前果实的编号
+                int downIndex1 = fruit1->getImgIndex();
+                int downIndex2 = fruit2->getImgIndex();
+                if (curIndex == downIndex1 && curIndex == downIndex2)
+                {
+                    return false;//可以消除，不是死地图
+                }
+            }
+            
+            //检查左方
+            if (col - 2 <= 0)//防止左方越界
+            {
+                //do noting;
+            }
+            else
+            {
+                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
+                DemonFruit* fruit1 = m_fruitsMatrix[row * m_width + col - 2];
+                DemonFruit* fruit2 = m_fruitsMatrix[row * m_width + col - 3];
+                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                {
+                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
+                    return false;
+                }
+                int curIndex = curFruit->getImgIndex();//当前果实的编号
+                int leftIndex1 = fruit1->getImgIndex();
+                int leftIndex2 = fruit2->getImgIndex();
+                
+                if (curIndex == leftIndex1 && curIndex == leftIndex2)
+                {
+                    return false;//可以消除，不是死地图
+                }
+            }
+            
+            //检查右方
+            if (col + 2 >= m_width - 1)//防止右方越界
+            {
+                //do noting;
+            }
+            else
+            {
+                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
+                DemonFruit* fruit1 = m_fruitsMatrix[row * m_width + col + 2];
+                DemonFruit* fruit2 = m_fruitsMatrix[row * m_width + col + 3];
+                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                {
+                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
+                    return false;
+                }
+                int curIndex = curFruit->getImgIndex();//当前果实的编号
+                int rightIndex1 = fruit1->getImgIndex();
+                int rightIndex2 = fruit2->getImgIndex();
+                
+                if (curIndex == rightIndex1 && curIndex == rightIndex2)
+                {
+                    return false;//可以消除，不是死地图
+                }
+            }
+        }
+    }
+    CCLOG("Dead Map!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    return true;//死地图
+}
+
+void PlayLayer::resetFruitMatrix()
+{
+    m_isAnimationing = true;//重置时有动画
+    float dt = 0.05;
+    //当前的果实全部变成灰色
+    for (int row = 0; row < m_height; row++)
+    {
+        for (int col = 0; col < m_width; col++)
+        {
+            DemonFruit* fruit = m_fruitsMatrix[row * m_width + col];
+            auto tt = TintTo::create(dt, 163, 163, 163);
+//            //这里果实矩阵和果实图片均是从左下角向右上角依次变灰，加个蒙版。
+//            //fruitTurnGray(fruit);
+            DelayTime* delayTime = DelayTime::create(dt * (row+col));
+            fruit->runAction(Sequence::create(delayTime,tt,CallFuncN::create(CC_CALLBACK_1(PlayLayer::actionEndCallback, this)), NULL));
+        }
+    }
+    //重新生成果实矩阵
+    auto callBack = CallFunc::create(CC_CALLBACK_0(PlayLayer::initFruitsMatrix, this));
+    Sequence* sq = Sequence::create(DelayTime::create(dt * (m_width+m_height)),callBack,NULL);
+    this->runAction(sq);
+
+}
+
+
+void PlayLayer::actionEndCallback(Node* node)
+{
+    DemonFruit* fruit = dynamic_cast<DemonFruit*>(node);
+    fruit->removeFromParent();
 }

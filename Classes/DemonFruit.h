@@ -19,7 +19,7 @@ public:
     DemonFruit();
     //根据行列以及果实编号创建
     static DemonFruit* create(int row, int col, int index);
-    void explodeFruit();//消除
+    void explodeFruit();//消除并移除
     void actionEndCallback(Node* node);//消除回调函数
     
     CC_SYNTHESIZE(int, m_row, Row);
