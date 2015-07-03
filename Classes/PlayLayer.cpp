@@ -720,7 +720,7 @@ void PlayLayer::resetFruitMatrix()
     //通过时间控制使果实消失完了再落下来新的，通过时间控制，使落下来后在开启update
     Sequence* sq = Sequence::create(DelayTime::create(dt * (m_width+m_height)),callBack,DelayTime::create(0.3),callBack2,NULL);
     this->runAction(sq);
-
+    //11111
 }
 
 
