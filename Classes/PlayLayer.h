@@ -40,7 +40,7 @@ private:
     Point positionOfItem(int row, int col);//返回矩阵元素对应的坐标
     DemonFruit* fruitOfPoint(Point* pos);//根据点击的位置选择对应的果实
     void checkAndSwapFruit();//检查是否可以交换
-    void swapFruitInMatrix();//交换矩阵中的两个果实，并没有改变坐标
+    void swapFruitInMatrix(DemonFruit* srcFruit, DemonFruit* dstFruit);//交换矩阵中的两个果实，并没有改变坐标
     //将与fruit相同编号的果实加入队列chainList
     void getColChain(DemonFruit *fruit, std::list<DemonFruit *> &chainList);
     void getRowChain(DemonFruit *fruit, std::list<DemonFruit *> &chainList);
@@ -52,6 +52,7 @@ private:
     bool isDeadMap();//是否无路可走
     void resetFruitMatrix();//没有可消除的时候则重新生成果实矩阵
     void actionEndCallback(Node* node);//消除回调函数,从父节点移除果实
+    void resetEndCallback();//重置完成后执行的回调，用于开启触摸和更新函数
 private:
     DemonFruit** m_fruitsMatrix;//一维数组表示的果实矩阵，从左下角开始
     int* m_iMatrix;//一维数组表示的整型生成矩阵，对应果实矩阵中果实的编号

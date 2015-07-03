@@ -98,7 +98,8 @@ bool PlayLayer::init()
     m_matrixLeftBottomY = 200;
     
     initFruitsMatrix();//根据m_iMatrix初始化果实矩阵
-    
+    //开启更新函数
+    scheduleUpdate();
     
     //触摸绑定--单点触摸
     auto touchListener = EventListenerTouchOneByOne::create();
@@ -133,8 +134,6 @@ void PlayLayer::initFruitsMatrix()
             createAndDropFruits(row, col, m_iMatrix[row * m_width + col]);
         }
     }
-    //开启更新函数
-    scheduleUpdate();
 }
 
 void PlayLayer::createAndDropFruits(int row, int col, int index)
@@ -262,10 +261,11 @@ DemonFruit* PlayLayer::fruitOfPoint(Point *pos)
     
     for (int i = 0; i < m_height * m_width; i++)
     {
+        //BUG
         fruit = m_fruitsMatrix[i];
         if (fruit->boundingBox().containsPoint(*pos))
         {
-            CCLOG("fruit index = %d",fruit->getImgIndex());
+//            CCLOG("fruit index = %d",fruit->getImgIndex());
             return fruit;
         }
     }
@@ -288,7 +288,7 @@ void PlayLayer::checkAndSwapFruit()
     float time = 0.2;
     
     //1.swap in matrix
-    swapFruitInMatrix();
+    swapFruitInMatrix(m_srcFruit,m_dstFruit);
     
     //2. check for remove able
     std::list<DemonFruit *> colChainListOfFirst;
@@ -315,7 +315,7 @@ void PlayLayer::checkAndSwapFruit()
     }
     
     //3. no chain, swap back
-    swapFruitInMatrix();
+    swapFruitInMatrix(m_srcFruit,m_dstFruit);
     
     m_srcFruit->runAction(Sequence::create(
                                            MoveTo::create(time, posOfDst),
@@ -327,16 +327,16 @@ void PlayLayer::checkAndSwapFruit()
                                            NULL));
 }
 
-void PlayLayer::swapFruitInMatrix()//交换矩阵中的两个果实，没有改变坐标
+void PlayLayer::swapFruitInMatrix(DemonFruit* srcFruit, DemonFruit* dstFruit)//交换矩阵中的两个果实，没有改变坐标
 {
-    m_fruitsMatrix[m_srcFruit->getRow() * m_width + m_srcFruit->getCol()] = m_dstFruit;
-    m_fruitsMatrix[m_dstFruit->getRow() * m_width + m_dstFruit->getCol()] = m_srcFruit;
-    int tmpRow = m_srcFruit->getRow();
-    int tmpCol = m_srcFruit->getCol();
-    m_srcFruit->setRow(m_dstFruit->getRow());
-    m_srcFruit->setCol(m_dstFruit->getCol());
-    m_dstFruit->setRow(tmpRow);
-    m_dstFruit->setCol(tmpCol);
+    m_fruitsMatrix[srcFruit->getRow() * m_width + srcFruit->getCol()] = dstFruit;
+    m_fruitsMatrix[dstFruit->getRow() * m_width + dstFruit->getCol()] = srcFruit;
+    int tmpRow = srcFruit->getRow();
+    int tmpCol = srcFruit->getCol();
+    srcFruit->setRow(dstFruit->getRow());
+    srcFruit->setCol(dstFruit->getCol());
+    dstFruit->setRow(tmpRow);
+    dstFruit->setCol(tmpCol);
 
 }
 
@@ -411,6 +411,7 @@ void PlayLayer::getRowChain(DemonFruit *fruit, std::list<DemonFruit *> &chainLis
 
 void PlayLayer::update(float dt)
 {
+    CCLOG("1");
     //check if animationing
     if(m_isAnimationing)
     {
@@ -432,22 +433,17 @@ void PlayLayer::update(float dt)
     
     if (!m_isAnimationing)
     {
-        if (isDeadMap())//死地图，重新生成
+        if (isDeadMap())
         {
-            m_isTouchEnable = false;//不允许触摸
-            unscheduleUpdate();//关闭更新
             resetFruitMatrix();//重新生成果实矩阵
         }
         else
         {
-            if (m_isNeedFillVacancies)//填充
+            checkAndRemoveChain();//检查是否需要移除，若移除则下落新的
+            if (m_isNeedFillVacancies)
             {
                 fillVacancies();
                 m_isNeedFillVacancies = false;
-            }
-            else//消除
-            {
-                checkAndRemoveChain();
             }
         }
     }
@@ -470,16 +466,16 @@ void PlayLayer::checkAndRemoveChain()
         }
         
         //检查并加入链表
-        std::list<DemonFruit*> colChianList;
-        getColChain(fruit, colChianList);
+        std::list<DemonFruit*> colChainList;
+        getColChain(fruit, colChainList);
         
         std::list<DemonFruit*> rowChainList;
         getRowChain(fruit, rowChainList);
         
-        if (colChianList.size() >= 3)//若有3个以上说明可以消除，标记
+        if (colChainList.size() >= 3)//若有3个以上说明可以消除，标记
         {
-            std::list<DemonFruit*>::iterator it = colChianList.begin();
-            for (; it != colChianList.end(); it++)
+            std::list<DemonFruit*>::iterator it = colChainList.begin();
+            for (; it != colChainList.end(); it++)
             {
                 DemonFruit* fruitTmp = *it;
                 fruitTmp->setIsNeedRemove(true);
@@ -586,106 +582,113 @@ void PlayLayer::fillVacancies()
 
 bool PlayLayer::isDeadMap()
 {
+    unscheduleUpdate();
+    m_isTouchEnable = false;
     //遍历m_fruitsMatrix
     for (int row = 0; row < m_height; row++)
     {
         for (int col = 0; col < m_width; col++)
         {
+            DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];//当前的果实
+            //x向上移动能消除的有四种情况，因此将x与上方的果实y互换（只在矩阵内互换，不需要互换坐标），交换后对x进行行列检测，如果>=3则不是死地图.不论是不是死地图，最后都要换回来，以免出错
+            //1.  x   2.  x y x  3.  x x y  4.  y x x
+            //    x         x            x      x
+            //    y
+            //    x
             //检查上方
-            if (row + 2 >= m_height - 1)//防止上方越界
+            if(row < m_height - 1)//上方还有果实
             {
-                //do noting;
-            }
-            else
-            {
-                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
-                DemonFruit* fruit1 = m_fruitsMatrix[(row+2) * m_width + col];
-                DemonFruit* fruit2 = m_fruitsMatrix[(row+3) * m_width + col];
-                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                //1.交换
+                DemonFruit* testFruit = m_fruitsMatrix[(row + 1) * m_width + col];
+                swapFruitInMatrix(curFruit,testFruit);
+                //2.检测
+                std::list<DemonFruit*> colChainList;
+                getColChain(curFruit, colChainList);
+                std::list<DemonFruit*> rowChainList;
+                getRowChain(curFruit, rowChainList);
+                //3.判断并换回
+                if (colChainList.size() >= 3 || rowChainList.size() >= 3)//可以消除
                 {
-                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
-                    return false;
+                    swapFruitInMatrix(curFruit, testFruit);//换回
+                    scheduleUpdate();
+                    m_isTouchEnable = true;
+                    return false;//不是死地图
                 }
-                int curIndex = curFruit->getImgIndex();
-                int upIndex1 = fruit1->getImgIndex();//当前上方第二个果实编号
-                int upIndex2 = fruit2->getImgIndex();//当前上方第三个果实编号
-                if (curIndex == upIndex1 && curIndex == upIndex2)
+                else
                 {
-                    return false;//如果上方2、3与自己标记相同，说明可以消除，不是死地图
+                    swapFruitInMatrix(curFruit, testFruit);//换回
                 }
             }
-            
             //检查下方
-            if (row - 2 <= 0)//防止下方越界
+            if(row >= 1)//下方还有果实
             {
-                //do noting;
-            }
-            else
-            {
-                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
-                DemonFruit* fruit1 = m_fruitsMatrix[(row-2) * m_width + col];
-                DemonFruit* fruit2 = m_fruitsMatrix[(row-3) * m_width + col];
-                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                //1.交换
+                DemonFruit* testFruit = m_fruitsMatrix[(row - 1) * m_width + col];
+                swapFruitInMatrix(curFruit,testFruit);
+                //2.检测
+                std::list<DemonFruit*> colChainList;
+                getColChain(curFruit, colChainList);
+                std::list<DemonFruit*> rowChainList;
+                getRowChain(curFruit, rowChainList);
+                //3.判断并换回
+                if (colChainList.size() >= 3 || rowChainList.size() >= 3)//可以消除
                 {
-                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
-                    return false;
+                    swapFruitInMatrix(curFruit, testFruit);//换回
+                    scheduleUpdate();
+                    m_isTouchEnable = true;
+                    return false;//不是死地图
                 }
-                int curIndex = curFruit->getImgIndex();//当前果实的编号
-                int downIndex1 = fruit1->getImgIndex();
-                int downIndex2 = fruit2->getImgIndex();
-                if (curIndex == downIndex1 && curIndex == downIndex2)
+                else
                 {
-                    return false;//可以消除，不是死地图
+                    swapFruitInMatrix(curFruit, testFruit);//换回
                 }
             }
-            
             //检查左方
-            if (col - 2 <= 0)//防止左方越界
+            if(col >= 1)//左边还有果实
             {
-                //do noting;
-            }
-            else
-            {
-                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
-                DemonFruit* fruit1 = m_fruitsMatrix[row * m_width + col - 2];
-                DemonFruit* fruit2 = m_fruitsMatrix[row * m_width + col - 3];
-                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                //1.交换
+                DemonFruit* testFruit = m_fruitsMatrix[row * m_width + col - 1];
+                swapFruitInMatrix(curFruit,testFruit);
+                //2.检测
+                std::list<DemonFruit*> colChainList;
+                getColChain(curFruit, colChainList);
+                std::list<DemonFruit*> rowChainList;
+                getRowChain(curFruit, rowChainList);
+                //3.判断并换回
+                if (colChainList.size() >= 3 || rowChainList.size() >= 3)//可以消除
                 {
-                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
-                    return false;
+                    swapFruitInMatrix(curFruit, testFruit);//换回
+                    scheduleUpdate();
+                    m_isTouchEnable = true;
+                    return false;//不是死地图
                 }
-                int curIndex = curFruit->getImgIndex();//当前果实的编号
-                int leftIndex1 = fruit1->getImgIndex();
-                int leftIndex2 = fruit2->getImgIndex();
-                
-                if (curIndex == leftIndex1 && curIndex == leftIndex2)
+                else
                 {
-                    return false;//可以消除，不是死地图
+                    swapFruitInMatrix(curFruit, testFruit);//换回
                 }
             }
-            
             //检查右方
-            if (col + 2 >= m_width - 1)//防止右方越界
+            if (col < m_width - 1)//右方还有果实
             {
-                //do noting;
-            }
-            else
-            {
-                DemonFruit* curFruit = m_fruitsMatrix[row * m_width + col];
-                DemonFruit* fruit1 = m_fruitsMatrix[row * m_width + col + 2];
-                DemonFruit* fruit2 = m_fruitsMatrix[row * m_width + col + 3];
-                if (NULL == curFruit || NULL == fruit1 || NULL == fruit2)
+                //1.交换
+                DemonFruit* testFruit = m_fruitsMatrix[row * m_width + col + 1];
+                swapFruitInMatrix(curFruit,testFruit);
+                //2.检测
+                std::list<DemonFruit*> colChainList;
+                getColChain(curFruit, colChainList);
+                std::list<DemonFruit*> rowChainList;
+                getRowChain(curFruit, rowChainList);
+                //3.判断并换回
+                if (colChainList.size() >= 3 || rowChainList.size() >= 3)//可以消除
                 {
-                    //如果为空，说明正在生成，认为不是死地图，下一帧在检查
-                    return false;
+                    swapFruitInMatrix(curFruit, testFruit);//换回
+                    scheduleUpdate();
+                    m_isTouchEnable = true;
+                    return false;//不是死地图
                 }
-                int curIndex = curFruit->getImgIndex();//当前果实的编号
-                int rightIndex1 = fruit1->getImgIndex();
-                int rightIndex2 = fruit2->getImgIndex();
-                
-                if (curIndex == rightIndex1 && curIndex == rightIndex2)
+                else
                 {
-                    return false;//可以消除，不是死地图
+                    swapFruitInMatrix(curFruit, testFruit);//换回
                 }
             }
         }
@@ -713,7 +716,9 @@ void PlayLayer::resetFruitMatrix()
     }
     //重新生成果实矩阵
     auto callBack = CallFunc::create(CC_CALLBACK_0(PlayLayer::initFruitsMatrix, this));
-    Sequence* sq = Sequence::create(DelayTime::create(dt * (m_width+m_height)),callBack,NULL);
+    auto callBack2 = CallFunc::create(CC_CALLBACK_0(PlayLayer::resetEndCallback, this));
+    //通过时间控制使果实消失完了再落下来新的，通过时间控制，使落下来后在开启update
+    Sequence* sq = Sequence::create(DelayTime::create(dt * (m_width+m_height)),callBack,DelayTime::create(0.3),callBack2,NULL);
     this->runAction(sq);
 
 }
@@ -723,4 +728,9 @@ void PlayLayer::actionEndCallback(Node* node)
 {
     DemonFruit* fruit = dynamic_cast<DemonFruit*>(node);
     fruit->removeFromParent();
+}
+
+void PlayLayer::resetEndCallback()
+{
+    scheduleUpdate();
 }
